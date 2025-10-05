@@ -101,15 +101,40 @@ AVAILABLE_FITS = {
 @app.route('/generate_3d', methods=['GET'])
 def generate_3d():
     # 1. 클라이언트가 요청한 파일 키를 가져옵니다 (예: 'm51')
-    file_key = request.args.get('file')
-
+    #file_key = request.args.get('file')
     # 2. 요청이 유효한지 확인
-    if not file_key or file_key not in AVAILABLE_FITS:
-        return jsonify({"error": "Invalid or missing file key"}), 400
+    # if not file_key or file_key not in AVAILABLE_FITS:
+    #     return jsonify({"error": "Invalid or missing file key"}), 400
 
-    fits_path = AVAILABLE_FITS[file_key]
-    if not os.path.exists(fits_path):
-        return jsonify({"error": f"FITS file not found at path: {fits_path}"}), 404
+    # fits_path = AVAILABLE_FITS[file_key]
+    # if not os.path.exists(fits_path):
+    #     return jsonify({"error": f"FITS file not found at path: {fits_path}"}), 404
+
+#//////////////////////////////
+    # --- 1. 6개의 파라미터 수신 및 검증 ---
+    params_keys = ['sersic_n', 'ba_ratio', 'sigma', 'sfr', 'redshift', 'sb_1re']
+    params = {}
+    try:
+        for key in params_keys:
+            # request.args.get으로 파라미터를 받고, float으로 변환
+            value = request.args.get(key)
+            if value is None:
+                # 파라미터가 하나라도 누락된 경우
+                raise ValueError(f"Missing required parameter: {key}")
+            params[key] = float(value)
+    except (ValueError, TypeError) as e:
+        # 파라미터가 없거나, 숫자로 변환할 수 없는 경우 400 Bad Request 오류 반환
+        return jsonify({"error": str(e)}), 400
+
+#////////////////////////////////
+    df_galaxy_samples = get_sample_galaxy_data(sersic_n, ba_ratio, sigma, sfr, redshift, sb_1re)
+    
+    predicted_type, predicted_size = predict_galaxy_all()
+
+    closest_file = find_closest_fits(predicted_type, predicted_size, df_galaxy_samples)
+
+    fits_path = AVAILABLE_FITS[closest_file]
+#///////////////////////////////    
 
     # 3. 실시간으로 3D 배열 생성
     voxel_3d_array = convert_fits_to_3d_array(fits_path, output_xy_size=128, output_depth=32)
