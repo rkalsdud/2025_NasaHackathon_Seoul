@@ -127,11 +127,11 @@ def generate_3d():
         return jsonify({"error": str(e)}), 400
 
 #////////////////////////////////
-    df_galaxy_samples = get_sample_galaxy_data(sersic_n, ba_ratio, sigma, sfr, redshift, sb_1re)
+    df_galaxy_samples = nd.get_sample_galaxy_data(sersic_n, ba_ratio, sigma, sfr, redshift, sb_1re)
     
-    predicted_type, predicted_size = predict_galaxy_all()
+    predicted_type, predicted_size = nd.predict_galaxy_all()
 
-    closest_file = find_closest_fits(predicted_type, predicted_size, df_galaxy_samples)
+    closest_file = nd.find_closest_fits(predicted_type, predicted_size, df_galaxy_samples)
 
     fits_path = AVAILABLE_FITS[closest_file]
 #///////////////////////////////    
