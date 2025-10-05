@@ -1,0 +1,619 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>ASCII Galaxy — NPY Volume Sampling</title>
+<style>
+  :root{color-scheme:dark}
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;background:#000;color:#ddd;font-family:ui-monospace,Menlo,Consolas,monospace}
+  .layout{display:grid;grid-template-columns:1fr 400px;gap:12px;height:100vh;padding:12px}
+  .left{display:grid;grid-template-rows:1fr;min-width:0;min-height:0}
+  .square-wrap{height:100%;display:grid;place-items:center}
+  .square{height:100%;aspect-ratio:1/1;width:auto;max-width:100%;background:#060606;border:1px solid #2c2c2c;border-radius:12px;overflow:auto;padding:8px}
+  pre{margin:0;line-height:1.05;letter-spacing:.02em;font-size:14px;white-space:pre}
+  .sidebar{display:grid;grid-template-rows:auto auto 1fr;gap:12px;height:100%}
+  .toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .btn{background:#222;border:1px solid #333;color:#ddd;border-radius:18px;padding:6px 10px;cursor:pointer}
+  .btn:hover{background:#2a2a2a}
+  .panel{background:#0b0b0b;border:1px solid #222;border-radius:12px;padding:10px;overflow:auto}
+  .group{display:grid;gap:10px}
+  .row{display:grid;grid-template-columns:120px 1fr 100px;gap:8px;align-items:center}
+  .label{color:#bbb;font-size:12px}
+  .slider{accent-color:#888;width:100%}
+  .num{font-variant-numeric:tabular-nums;color:#999;text-align:right}
+  .file{display:flex;gap:8px;align-items:center;font-size:12px;color:#aaa}
+  .hint{color:#888;font-size:11px}
+  select, input[type="checkbox"], input[type="number"], input[type="text"]{background:#151515;color:#ddd;border:1px solid #333;border-radius:8px;padding:4px}
+  .pseudo-full{position:fixed;inset:0;width:100vw;height:100vh;z-index:9999;padding:12px;background:#000}
+  @media (max-width:900px){.layout{grid-template-columns:1fr}.sidebar{order:-1}}
+</style>
+</head>
+<body>
+<div id="container" class="layout">
+  <div class="left">
+    <div class="square-wrap">
+      <div class="square" id="dropzone" title=".npy 드롭 가능">
+        <pre id="out">loading…</pre>
+      </div>
+    </div>
+  </div>
+
+  <div class="sidebar">
+    <div class="toolbar">
+      <button id="play" class="btn" title="Spacebar로도 토글">일시정지</button>
+      <button id="mode" class="btn">3D 모드</button>
+      <button id="fs" class="btn">전체화면</button>
+    </div>
+
+    <!-- NPY / 볼륨 샘플링 -->
+    <div class="panel">
+      <div class="group">
+        <div class="row file">
+          <div class="label">NPY 파일</div>
+          <input id="npyFile" type="file" accept=".npy"/>
+          <span id="npyStatus" class="num">미로딩</span>
+        </div>
+
+        <!-- API에서 바로 받기 -->
+        <!-- 하이퍼파라미터 슬라이더 + 설명 ------------------------------------>
+      <div class="panel">
+        <style>
+          .desc{grid-column: 1 / -1; color:#8a8a8a; font-size:11.5px; margin:-6px 0 8px 0; line-height:1.35}
+          .row .val{font-variant-numeric:tabular-nums; text-align:right; color:#aaa}
+        </style>
+        <div class="group" id="hpPanel">
+
+          <!-- Sérsic n -->
+          <div class="row">
+            <div class="label">Sérsic n</div>
+            <input id="hp_sersic_n" class="slider" type="range" min="0.5" max="8" step="0.1" value="2.4"/>
+            <div class="val" id="hp_sersic_n_val">2.4</div>
+          </div>
+          <div class="desc">광도 프로파일의 꼬리 굴곡을 나타내는 지수. n↑ → 중심 집중도↑ (타원은하 쪽).</div>
+
+          <!-- b/a ratio -->
+          <div class="row">
+            <div class="label">b/a ratio</div>
+            <input id="hp_ba" class="slider" type="range" min="0" max="1" step="0.01" value="0.65"/>
+            <div class="val" id="hp_ba_val">0.65</div>
+          </div>
+          <div class="desc">단축/장축 비. 1.0에 가까울수록 원형, 0에 가까울수록 엣지온(얇음).</div>
+
+          <!-- sigma -->
+          <div class="row">
+            <div class="label">σ (km/s)</div>
+            <input id="hp_sigma" class="slider" type="range" min="50" max="400" step="1" value="110"/>
+            <div class="val" id="hp_sigma_val">110</div>
+          </div>
+          <div class="desc">중심 속도 분산. 질량/벌지와 연관. 값이 클수록 무거운 은하 경향.</div>
+
+          <!-- SFR -->
+          <div class="row">
+            <div class="label">SFR</div>
+            <input id="hp_sfr" class="slider" type="range" min="0" max="5" step="0.01" value="0.03"/>
+            <div class="val" id="hp_sfr_val">0.03</div>
+          </div>
+          <div class="desc">별 생성률 (M☉/yr). 값이 클수록 푸른 원반/나선 활동이 활발.</div>
+
+          <!-- redshift -->
+          <div class="row">
+            <div class="label">z (redshift)</div>
+            <input id="hp_z" class="slider" type="range" min="0" max="0.3" step="0.001" value="0.06"/>
+            <div class="val" id="hp_z_val">0.060</div>
+          </div>
+          <div class="desc">거리/시대 지표. 데모에서는 예측 특징량으로만 사용.</div>
+
+          <!-- SB@1Re -->
+          <div class="row">
+            <div class="label">SB@1Re</div>
+            <input id="hp_sb1" class="slider" type="range" min="0" max="2" step="0.01" value="0.40"/>
+            <div class="val" id="hp_sb1_val">0.40</div>
+          </div>
+          <div class="desc">유효반경에서의 표면광도(정규화). 중심 대비 외곽 밝기 경향.</div>
+
+          <!-- Volume options -->
+          <div class="row">
+            <div class="label">Depth (D)</div>
+            <input id="hp_depth" class="slider" type="range" min="8" max="256" step="1" value="64"/>
+            <div class="val" id="hp_depth_val">64</div>
+          </div>
+          <div class="desc">Z 방향 단면 수. 값↑ → 3D 두께 해상도↑(계산량 증가).</div>
+
+          <div class="row">
+            <div class="label">Thickness</div>
+            <input id="hp_thick" class="slider" type="range" min="0.05" max="1.0" step="0.01" value="0.35"/>
+            <div class="val" id="hp_thick_val">0.35</div>
+          </div>
+          <div class="desc">원반/벌지의 Z 두께 가중치. 0.05=얇은 원반, 1.0=두꺼운 벌지.</div>
+
+          <div class="row">
+            <div class="label">XY size</div>
+            <input id="hp_xy" class="slider" type="range" min="32" max="512" step="16" value="192"/>
+            <div class="val" id="hp_xy_val">192</div>
+          </div>
+          <div class="desc">XY 해상도(픽셀). 값↑ → 샘플링 품질↑(전송/연산량 증가).</div>
+
+          <!-- Generate -->
+          <div class="row file">
+            <div class="label">Generate</div>
+            <button id="generate" class="btn">서버 호출 & 갱신</button>
+            <span id="apiStatus" class="hint">대기중</span>
+          </div>
+          <div class="desc">버튼으로 즉시 갱신하거나, 슬라이더 변경 시 자동으로 디바운스 호출됩니다.</div>
+
+        </div>
+      </div>
+      <!-- /하이퍼파라미터 슬라이더 --------------------------------------------->
+
+        
+
+        <div class="row">
+          <div class="label">NPY 사용</div>
+          <input id="useNpy" type="checkbox"/>
+          <div id="useNpyVal" class="num">off</div>
+        </div>
+
+        <div class="row">
+          <div class="label">볼륨 샘플링 사용</div>
+          <input id="useVolume" type="checkbox"/>
+          <div id="useVolumeVal" class="num">off</div>
+        </div>
+
+        <div class="row">
+          <div class="label">BLEND</div>
+          <input id="mix" class="slider" type="range" min="0" max="1" step="0.05" value="1"/>
+          <div id="mixVal" class="num">1.00</div>
+        </div>
+
+        <div class="row"><div class="label">전처리: log1p</div><input id="ppLog" type="checkbox"/><div id="ppLogVal" class="num">off</div></div>
+        <div class="row"><div class="label">감마</div><input id="ppGamma" class="slider" type="range" min="0.4" max="2" step="0.05" value="1.0"/><div id="ppGammaVal" class="num">1.00</div></div>
+        <div class="row"><div class="label">threshold</div><input id="ppThresh" class="slider" type="range" min="0" max="0.5" step="0.01" value="0.02"/><div id="ppThreshVal" class="num">0.02</div></div>
+
+        <div class="row"><div class="label">X축 원본</div>
+          <select id="axisX"><option>W</option><option selected>H</option><option>D</option></select><div class="num" id="axisXVal">H</div></div>
+        <div class="row"><div class="label">Y축 원본</div>
+          <select id="axisY"><option selected>W</option><option>H</option><option>D</option></select><div class="num" id="axisYVal">W</div></div>
+        <div class="row"><div class="label">Z축 원본</div>
+          <select id="axisZ"><option>W</option><option>H</option><option selected>D</option></select><div class="num" id="axisZVal">D</div></div>
+
+        <div class="row"><div class="label">보xel 스케일 X</div><input id="scaleX" class="slider" type="range" min="0.5" max="3" step="0.05" value="1.0"/><div id="scaleXVal" class="num">1.00</div></div>
+        <div class="row"><div class="label">보xel 스케일 Y</div><input id="scaleY" class="slider" type="range" min="0.5" max="3" step="0.05" value="1.0"/><div id="scaleYVal" class="num">1.00</div></div>
+        <div class="row"><div class="label">보xel 스케일 Z</div><input id="scaleZ" class="slider" type="range" min="0.5" max="3" step="0.05" value="1.3"/><div id="scaleZVal" class="num">1.30</div></div>
+
+        <div class="row"><div class="label">샘플 별 수(×1e3)</div><input id="volStarsK" class="slider" type="range" min="10" max="200" step="5" value="60"/><div id="volStarsKVal" class="num">60k</div></div>
+
+        <div class="hint">
+          · “볼륨 샘플링 사용” 체크 시, NPY 3D 밀도에서 별을 직접 샘플링해 3D로 투영합니다.<br/>
+          · m78 같은 타원 은하는 Z 스케일을 조금 키우고(log1p ON), 감마를 0.8~1.2로 조절해 보세요.
+        </div>
+      </div>
+    </div>
+
+    <!-- 절차적 파라미터 -->
+    <div class="panel">
+      <div class="group">
+        <div class="row"><div class="label">속도</div><input id="speed" class="slider" type="range" min="0.2" max="2" step="0.05" value="0.8"/><div id="speedVal" class="num">0.80</div></div>
+        <div class="row"><div class="label">밀도</div><input id="density" class="slider" type="range" min="0.2" max="1.5" step="0.05" value="0.7"/><div id="densityVal" class="num">0.70</div></div>
+        <div class="row"><div class="label">블러</div><input id="blur" class="slider" type="range" min="0" max="5" step="1" value="3"/><div id="blurVal" class="num">3</div></div>
+
+        <div class="row"><div class="label">팔(arms)</div><input id="arms" class="slider" type="range" min="1" max="6" step="1" value="2"/><div id="armsVal" class="num">2</div></div>
+        <div class="row"><div class="label">피치</div><input id="pitch" class="slider" type="range" min="2.0" max="3.2" step="0.01" value="2.6"/><div id="pitchVal" class="num">2.60</div></div>
+        <div class="row"><div class="label">팔 노이즈</div><input id="armSpread" class="slider" type="range" min="0.1" max="0.5" step="0.01" value="0.20"/><div id="armSpreadVal" class="num">0.20</div></div>
+        <div class="row"><div class="label">반경 노이즈</div><input id="radialSpread" class="slider" type="range" min="0.05" max="0.5" step="0.005" value="0.10"/><div id="radialSpreadVal" class="num">0.10</div></div>
+        <div class="row"><div class="label">바</div><input id="barStrength" class="slider" type="range" min="0" max="1" step="0.01" value="0.10"/><div id="barStrengthVal" class="num">0.10</div></div>
+        <div class="row"><div class="label">고리</div><input id="ringStrength" class="slider" type="range" min="0" max="1" step="0.01" value="0.05"/><div id="ringStrengthVal" class="num">0.05</div></div>
+        <div class="row"><div class="label">타원율</div><input id="ellipticity" class="slider" type="range" min="0" max="0.6" step="0.01" value="0.25"/><div id="ellipticityVal" class="num">0.25</div></div>
+
+        <div id="row3d">
+          <div class="row"><div class="label">기본각 X</div><input id="baseX" class="slider" type="range" min="-3.14" max="3.14" step="0.01" value="-0.10"/><div id="baseXVal" class="num">-0.10</div></div>
+          <div class="row"><div class="label">기본각 Y</div><input id="baseY" class="slider" type="range" min="-3.14" max="3.14" step="0.01" value="0.0"/><div id="baseYVal" class="num">0.00</div></div>
+          <div class="row"><div class="label">기본각 Z</div><input id="baseZ" class="slider" type="range" min="-3.14" max="3.14" step="0.01" value="0.0"/><div id="baseZVal" class="num">0.00</div></div>
+          <div class="row"><div class="label">회전속도 X</div><input id="spinX" class="slider" type="range" min="-1" max="1" step="0.01" value="0.0"/><div id="spinXVal" class="num">0.00</div></div>
+          <div class="row"><div class="label">회전속도 Y</div><input id="spinY" class="slider" type="range" min="-1" max="1" step="0.01" value="0.0"/><div id="spinYVal" class="num">0.00</div></div>
+          <div class="row"><div class="label">회전속도 Z</div><input id="spinZ" class="slider" type="range" min="-1" max="1" step="0.01" value="0.12"/><div id="spinZVal" class="num">0.12</div></div>
+          <div class="row"><div class="label">카메라 Z</div><input id="camZ" class="slider" type="range" min="1.4" max="3.2" step="0.01" value="2.2"/><div id="camZVal" class="num">2.20</div></div>
+          <div class="row"><div class="label">Z 스프레드</div><input id="zSpread" class="slider" type="range" min="0" max="1.2" step="0.01" value="0.35"/><div id="zSpreadVal" class="num">0.35</div></div>
+          <div class="row"><div class="label">두께</div><input id="thickness" class="slider" type="range" min="0.05" max="0.8" step="0.01" value="0.35"/><div id="thicknessVal" class="num">0.35</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(()=>{
+  const charset=" .__`,:';-~*_+<>i!lI|()[]{}1?tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$";
+  const out=byId('out'), container=byId('container'), row3d=byId('row3d'), dropzone=byId('dropzone');
+  const rnd=Math.random;
+
+  // ------- helpers -------
+  function byId(id){return document.getElementById(id)}
+  function numSpan(id){return byId(id+"Val")}
+  function clamp(v,a,b){return v<a?a:(v>b?b:v)}
+  function getGridSize(){
+    const r=out.parentElement.getBoundingClientRect();
+    const cw=9.5,ch=16.5;
+    return [Math.max(50,(r.width/cw)|0), Math.max(50,(r.height/ch)|0)];
+  }
+  function normalize01(arr){
+    let mn=Infinity,mx=-Infinity; for(let i=0;i<arr.length;i++){const v=arr[i]; if(v<mn)mn=v; if(v>mx)mx=v}
+    const inv=mx>mn?1/(mx-mn):1; for(let i=0;i<arr.length;i++) arr[i]=(arr[i]-mn)*inv;
+  }
+  function fieldToAscii(field, cols, rows, chars){
+    const n=chars.length-1; let s="";
+    for(let y=0;y<rows;y++){
+      const off=y*cols;
+      for(let x=0;x<cols;x++){const v=field[off+x]; s+=chars[ clamp((v*n)|0,0,n) ];}
+      if(y<rows-1)s+="\n";
+    }
+    return s;
+  }
+  function boxBlur(field, cols, rows, passes=1){
+    if(passes<=0) return field;
+    const tmp=new Float32Array(cols*rows);
+    for(let p=0;p<passes;p++){
+      for(let y=0;y<rows;y++){ for(let x=0;x<cols;x++){ const i=y*cols+x,l=y*cols+Math.max(0,x-1),r=y*cols+Math.min(cols-1,x+1); tmp[i]=(field[l]+field[i]+field[r])/3; } }
+      for(let y=0;y<rows;y++){ for(let x=0;x<cols;x++){ const i=y*cols+x,u=Math.max(0,y-1)*cols+x,d=Math.min(rows-1,y+1)*cols+x; field[i]=(tmp[u]+tmp[i]+tmp[d])/3; } }
+    }
+    return field;
+  }
+  function resample2D(src, sw, sh, dw, dh){
+    const out=new Float32Array(dw*dh);
+    for(let y=0;y<dh;y++){
+      const v=(y+0.5)/dh*sh-0.5, y0=clamp(Math.floor(v),0,sh-2), dy=v-y0;
+      for(let x=0;x<dw;x++){
+        const u=(x+0.5)/dw*sw-0.5, x0=clamp(Math.floor(u),0,sw-2), dx=u-x0;
+        const i00=y0*sw+x0; const v00=src[i00], v10=src[i00+1], v01=src[i00+sw], v11=src[i00+sw+1];
+        out[y*dw+x]=(1-dx)*(1-dy)*v00+dx*(1-dy)*v10+(1-dx)*dy*v01+dx*dy*v11;
+      }
+    }
+    normalize01(out); return out;
+  }
+
+  // ------- UI state -------
+  const sliders=["mix","speed","density","blur","arms","pitch","armSpread","radialSpread","barStrength","ringStrength","ellipticity","baseX","baseY","baseZ","spinX","spinY","spinZ","camZ","zSpread","thickness","ppGamma","ppThresh","scaleX","scaleY","scaleZ","volStarsK"];
+  const state={};
+  sliders.forEach(id=>{
+    const el=byId(id); if(!el) return; const span=numSpan(id);
+    const update=()=>{ let v=parseFloat(el.value); state[id]=v; if(span){ if(id==="volStarsK") span.textContent=v.toFixed(0)+"k"; else span.textContent=(parseFloat(el.step||"0.01")%1===0?v.toFixed(0):v.toFixed(2)); } };
+    el.addEventListener('input',update); update();
+  });
+  // checkboxes / selects
+  function bindChk(id,span){ const el=byId(id), sp=byId(span); state[id]=el.checked; el.addEventListener('change',()=>{state[id]=el.checked; if(sp) sp.textContent=el.checked?"on":"off"}); if(sp) sp.textContent=el.checked?"on":"off"; }
+  bindChk("useNpy","useNpyVal"); bindChk("useVolume","useVolumeVal"); bindChk("ppLog","ppLogVal");
+  function bindSel(id,valSpan){ const el=byId(id), sp=byId(valSpan); state[id]=el.value; el.addEventListener('change',()=>{ state[id]=el.value; if(sp) sp.textContent=state[id]; }); sp.textContent=state[id]; }
+  bindSel("axisX","axisXVal"); bindSel("axisY","axisYVal"); bindSel("axisZ","axisZVal");
+
+  // play / mode / fullscreen / spacebar
+  let paused=false, mode3D=true, pseudoFull=false;
+  byId('play').onclick=()=>togglePause();
+  window.addEventListener('keydown',e=>{ if(e.code==='Space'){ e.preventDefault(); togglePause(); } });
+  function togglePause(){ paused=!paused; byId('play').textContent=paused?"재생":"일시정지"; }
+  byId('mode').onclick=()=>{ mode3D=!mode3D; byId('mode').textContent=mode3D?"3D 모드":"2D 모드"; row3d.style.display=mode3D?"":"none"; };
+  byId('fs').onclick=async()=>{
+    const doc=document;
+    try{
+      if(!doc.fullscreenElement && container.requestFullscreen && doc.fullscreenEnabled){ await container.requestFullscreen(); return; }
+      if(doc.fullscreenElement && doc.exitFullscreen){ await doc.exitFullscreen(); return; }
+      pseudoFull=!pseudoFull; container.classList.toggle('pseudo-full',pseudoFull);
+    }catch{ pseudoFull=!pseudoFull; container.classList.toggle('pseudo-full',pseudoFull); }
+  };
+
+  // ------- NPY loader (file & buffer) -------
+  let volume=null; // {data:Float32Array, W,H,D}
+  dropzoneEvents();
+  byId('npyFile').addEventListener('change',e=>{ const f=e.target.files?.[0]; if(f) loadNPY(f); });
+
+  function dropzoneEvents(){
+    ['dragenter','dragover','dragleave','drop'].forEach(ev=>dropzone.addEventListener(ev,(e)=>{e.preventDefault();e.stopPropagation();},false));
+    dropzone.addEventListener('drop',e=>{ const f=e.dataTransfer.files?.[0]; if(f&&f.name.endsWith('.npy')) loadNPY(f); });
+  }
+
+  async function loadNPY(file){
+    const buf=await file.arrayBuffer();
+    await loadNPYFromBuffer(buf);
+  }
+
+  async function loadNPYFromBuffer(buf){
+    try{
+      const p=parseNPY(buf);
+      const shape=p.shape; // [H,W] or [H,W,D]
+      const descr=p.descr;
+      let arr;
+      if(descr.includes('f4')) arr=new Float32Array(p.data.buffer,p.data.byteOffset,p.data.byteLength/4);
+      else if(descr.includes('f8')){ const f64=new Float64Array(p.data.buffer,p.data.byteOffset,p.data.byteLength/8); arr=new Float32Array(f64.length); for(let i=0;i<f64.length;i++) arr[i]=f64[i]; }
+      else throw new Error("지원하지 않는 dtype: "+descr);
+
+      let H,W,D=1;
+      if(shape.length===2){ [H,W]=shape; D=1; }
+      else if(shape.length===3){ [H,W,D]=shape; }
+      else throw new Error("2D/3D만 지원");
+
+      normalize01(arr);
+      volume={data:arr, W, H, D};
+      byId('npyStatus').textContent= D>1 ? `${W}×${H}×${D}` : `${W}×${H}`;
+      invalidateSamples();
+    }catch(err){
+      byId('npyStatus').textContent="로드 실패";
+      alert("NPY 파싱 실패: "+err.message);
+      volume=null;
+    }
+  }
+
+  function parseNPY(ab){
+    const MAGIC=[0x93,0x4E,0x55,0x4D,0x50,0x59];
+    const m=new Uint8Array(ab,0,6); for(let i=0;i<6;i++) if(m[i]!==MAGIC[i]) throw new Error("NPY magic mismatch");
+    const ver=new Uint8Array(ab,6,2), major=ver[0], minor=ver[1]; let headerLen,off;
+    if(major===1){ headerLen=new DataView(ab,8,2).getUint16(0,true); off=10; }
+    else if(major===2){ headerLen=new DataView(ab,8,4).getUint32(0,true); off=12; }
+    else throw new Error("Unsupported NPY version "+major+"."+minor);
+    const header=new TextDecoder("latin1").decode(new Uint8Array(ab,off,headerLen));
+    const descr=header.match(/'descr':\s*'([^']+)'/)[1];
+    const fortran=/'fortran_order':\s*(True|False)/.exec(header)[1]==="True";
+    if(fortran) throw new Error("Fortran order 미지원");
+    const shape=header.match(/'shape':\s*\(([^)]+)\)/)[1].split(',').map(s=>parseInt(s.trim())).filter(n=>!isNaN(n));
+    const dataOff=off+headerLen; const data=new Uint8Array(ab,dataOff);
+    return {descr,shape,data};
+  }
+
+  // ------- Procedural (fallback & mix) -------
+  function renderGalaxy2D(p){
+    const {cols,rows,time,arms,pitch,armSpread,radialSpread,barStrength,ringStrength,ellipticity,density}=p;
+    const field=new Float32Array(cols*rows);
+    const margin=.92, N=(density*cols*rows)|0, rot=time*.18;
+    for(let s=0;s<N;s++){
+      let r=Math.min(1, Math.pow(rnd(),0.7)*0.9 + rnd()*0.15);
+      const arm=(rnd()*Math.max(1,arms))|0, phi=arm*(2*Math.PI)/Math.max(1,arms);
+      let th=pitch*Math.log(r+1e-3)+phi+(rnd()-.5)*p.armSpread; r+= (rnd()-.5)*p.radialSpread; r=clamp(r,0,1);
+      let x=r*Math.cos(th), y=r*Math.sin(th);
+      if(barStrength>0){ y=y*(1-0.55*barStrength)+(rnd()-.5)*0.02*barStrength; }
+      if(ringStrength>0){
+        const rr=Math.hypot(x,y), target=.65, pull=.28*ringStrength;
+        if(rr>1e-6){ x+=(target-rr)*(x/rr)*pull; y+=(target-rr)*(y/rr)*pull; }
+        const ang=Math.atan2(y,x)+(rnd()-.5)*0.15*ringStrength, r2=Math.hypot(x,y);
+        x=r2*Math.cos(ang); y=r2*Math.sin(ang);
+      }
+      if(ellipticity>0) y*=1-Math.min(.8,ellipticity);
+      const c=Math.cos(rot), s=Math.sin(rot); const xr=x*c-y*s, yr=x*s+y*c;
+      const rr2=Math.hypot(xr,yr);
+      let b=Math.pow(1-Math.min(1,rr2),2.1); b+= .8*Math.exp(-.5*Math.pow(rr2/Math.max(1e-6,.055),2));
+      const sx=(xr/margin+1)*.5*(cols-1), sy=(yr/margin+1)*.5*(rows-1);
+      if(sx<0||sx>=cols-1||sy<0||sy>=rows-1) continue;
+      const x0=sx|0,y0=sy|0,dx=sx-x0,dy=sy-y0,x1=x0+1,y1=y0+1;
+      const w00=(1-dx)*(1-dy),w10=dx*(1-dy),w01=(1-dx)*dy,w11=dx*dy;
+      field[y0*cols+x0]+=b*w00; field[y0*cols+x1]+=b*w10; field[y1*cols+x0]+=b*w01; field[y1*cols+x1]+=b*w11;
+    }
+    boxBlur(field,cols,rows,Math.round(state.blur)); normalize01(field); return field;
+  }
+
+  function renderGalaxy3D(p){
+    const {cols,rows,time,arms,pitch,armSpread,radialSpread,barStrength,ringStrength,ellipticity,baseX,baseY,baseZ,spinX,spinY,spinZ,camZ,zSpread,thickness,density}=p;
+    const field=new Float32Array(cols*rows);
+    const N=(density*cols*rows*1.2)|0, margin=.92;
+    const rx=baseX+time*spinX, ry=baseY+time*spinY, rz=baseZ+time*spinZ;
+    const cX=Math.cos(rx),sX=Math.sin(rx),cY=Math.cos(ry),sY=Math.sin(ry),cZ=Math.cos(rz),sZ=Math.sin(rz);
+    for(let i=0;i<N;i++){
+      let r=Math.min(1, Math.pow(rnd(),0.7)*0.9 + rnd()*0.15);
+      const arm=(rnd()*Math.max(1,arms))|0, phi=arm*(2*Math.PI)/Math.max(1,arms);
+      let th=pitch*Math.log(r+1e-3)+phi+(rnd()-.5)*armSpread; r+= (rnd()-.5)*radialSpread; r=clamp(r,0,1);
+      let x=r*Math.cos(th), y=r*Math.sin(th), z=(rnd()-.5)*thickness + (rnd()-.5)*zSpread*r;
+      if(barStrength>0) y = y*(1-0.55*barStrength) + (rnd()-.5)*0.02*barStrength;
+      if(ringStrength>0){ const rr=Math.hypot(x,y), target=.65, pull=.28*ringStrength; if(rr>1e-6){ x+=(target-rr)*(x/rr)*pull; y+=(target-rr)*(y/rr)*pull; } const ang=Math.atan2(y,x)+(rnd()-.5)*0.15*ringStrength, r2=Math.hypot(x,y); x=r2*Math.cos(ang); y=r2*Math.sin(ang); }
+      if(ellipticity>0) y*=1-Math.min(.8,ellipticity);
+      // rotate
+      let yx=y*cX - z*sX, zx=y*sX + z*cX, xx=x;
+      let xxy=xx*cY + zx*sY, zxy=-xx*sY + zx*cY, yxy=yx;
+      const xr=xxy*cZ - yxy*sZ, yr=xxy*sZ + yxy*cZ, zr=zxy;
+      const rr2=Math.sqrt(xr*xr+yr*yr+(zr*.75)*(zr*.75));
+      let b=Math.pow(1-Math.min(1,rr2),2.1); b+= .9*Math.exp(-.5*Math.pow(rr2/Math.max(1e-6,.055),2));
+      const proj= 1.1/(state.camZ - zr + 1e-3), fog=clamp((state.camZ - zr)/(state.camZ + 1e-3),0,1);
+      b*= Math.pow(fog,.8);
+      const sx=(xr*proj/margin+.5)*(cols-1), sy=(yr*proj/margin+.5)*(rows-1);
+      if(sx<0||sx>=cols-1||sy<0||sy>=rows-1) continue;
+      const x0=sx|0,y0=sy|0,dx=sx-x0,dy=sy-y0,x1=x0+1,y1=y0+1;
+      const w00=(1-dx)*(1-dy),w10=dx*(1-dy),w01=(1-dx)*dy,w11=dx*dy;
+      field[y0*cols+x0]+=b*w00; field[y0*cols+x1]+=b*w10; field[y1*cols+x0]+=b*w01; field[y1*cols+x1]+=b*w11;
+    }
+    boxBlur(field,cols,rows,Math.round(state.blur)); normalize01(field); return field;
+  }
+
+  // ------- Volume Importance Sampling -------
+  let samples=null; // {pts: Float32Array [N*3]}
+  function invalidateSamples(){ samples=null; }
+
+  function buildSamplesFromVolume(){
+    if(!volume) return null;
+    const {data,W,H,D}=volume;
+
+    // 축 매핑
+    const axMap={W:0,H:1,D:2};
+    const axX=axMap[state.axisX], axY=axMap[state.axisY], axZ=axMap[state.axisZ];
+
+    const scaleX=state.scaleX, scaleY=state.scaleY, scaleZ=state.scaleZ;
+
+    // 전처리(log, gamma, threshold)
+    const logOn=byId('ppLog').checked, gamma=state.ppGamma, thr=state.ppThresh;
+
+    const coords=[]; const values=[];
+    for(let h=0;h<H;h++){
+      for(let w=0;w<W;w++){
+        for(let d=0;d<D;d++){
+          const idx=(h*W + w)*D + d;
+          let v=data[idx];
+          if(logOn) v=Math.log1p(v);
+          v=Math.pow(v, 1/gamma);
+          if(v<=thr) continue;
+
+          // 원본 [W,H,D] 인덱싱으로 좌표 매핑
+          const map=[axX===0?w:axX===1?h:d, axY===0?w:axY===1?h:d, axZ===0?w:axZ===1?h:d]; // [X,Y,Z]
+          const nx=(map[0]/(axX===0?W-1:axX===1?H-1:D-1))*2-1;
+          const ny=(map[1]/(axY===0?W-1:axY===1?H-1:D-1))*2-1;
+          const nz=(map[2]/(axZ===0?W-1:axZ===1?H-1:D-1))*2-1;
+
+          coords.push(nx*scaleX, ny*scaleY, nz*scaleZ);
+          values.push(v);
+        }
+      }
+    }
+    if(values.length===0) return null;
+
+    const valArr=Float32Array.from(values); normalize01(valArr);
+    const cdf=new Float32Array(valArr.length);
+    let sum=0; for(let i=0;i<valArr.length;i++){ sum+=valArr[i]; cdf[i]=sum; }
+    for(let i=0;i<cdf.length;i++) cdf[i]/=sum;
+
+    const N=((state.volStarsK|0)*1000)|0;
+    const pts=new Float32Array(N*3);
+    for(let i=0;i<N;i++){
+      const u=Math.random();
+      let lo=0, hi=cdf.length-1;
+      while(lo<hi){ const mid=(lo+hi)>>>1; if(cdf[mid]<u) lo=mid+1; else hi=mid; }
+      const j=lo*3;
+      pts[i*3+0]=coords[j+0];
+      pts[i*3+1]=coords[j+1];
+      pts[i*3+2]=coords[j+2];
+    }
+    samples={pts};
+    return samples;
+  }
+
+// ===== 서버 호출 공통 =====
+function collectParams(){
+  return {
+    sersic_n:  parseFloat(byId('hp_sersic_n').value),
+    ba_ratio:  parseFloat(byId('hp_ba').value),
+    sigma:     parseFloat(byId('hp_sigma').value),
+    sfr:       parseFloat(byId('hp_sfr').value),
+    redshift:  parseFloat(byId('hp_z').value),
+    sb_1re:    parseFloat(byId('hp_sb1').value),
+    depth:     parseInt(byId('hp_depth').value),
+    thickness: parseFloat(byId('hp_thick').value),
+    out_xy:    parseInt(byId('hp_xy').value),
+  };
+}
+
+async function fetchVolumeAndApply(){
+  const p = collectParams();
+  const qs = new URLSearchParams(Object.entries(p).map(([k,v])=>[k,String(v)]));
+  const url = `http://127.0.0.1:8000/predict_volume.npy?${qs.toString()}`;
+
+  const statusEl = byId('apiStatus');
+  try{
+    statusEl.textContent = '요청 중…';
+    const res = await fetch(url);
+    if(!res.ok){ statusEl.textContent = `에러 ${res.status}`; throw new Error('API '+res.status); }
+    const buf = await res.arrayBuffer();
+    await loadNPYFromBuffer(buf);
+    byId('useNpy').checked = true;  byId('useNpyVal').textContent='on';
+    byId('useVolume').checked = true; byId('useVolumeVal').textContent='on';
+    statusEl.textContent = '완료';
+  }catch(err){
+    statusEl.textContent = '실패';
+    alert('API 실패: '+err.message);
+  }
+}
+
+// 버튼 클릭 호출
+byId('generate').addEventListener('click', fetchVolumeAndApply);
+
+// 슬라이더 변경 디바운스 자동 호출
+(function bindHpSliders(){
+  const ids=['hp_sersic_n','hp_ba','hp_sigma','hp_sfr','hp_z','hp_sb1','hp_depth','hp_thick','hp_xy'];
+  const fmt=(id,val)=>{
+    if(id==='hp_z') return val.toFixed(3);
+    if(id==='hp_sersic_n'||id==='hp_ba'||id==='hp_sfr'||id==='hp_thick'||id==='hp_sb1') return (+val).toFixed( (id==='hp_ba'||id==='hp_thick')?2:2 );
+    return String(val);
+  };
+  let timer=null;
+  const schedule=()=>{ clearTimeout(timer); timer=setTimeout(fetchVolumeAndApply, 400); };
+  ids.forEach(id=>{
+    const el=byId(id), val=byId(id+'_val');
+    const upd=()=>{ val.textContent=fmt(id, parseFloat(el.value)); schedule(); };
+    el.addEventListener('input', upd);
+    upd(); // 초기 표시
+  });
+})();
+
+
+  // ------- Main loop -------
+  const start=performance.now();
+  function tick(){
+    const t=(performance.now()-start)/1000*state.speed;
+    if(!paused){
+      const [cols,rows]=getGridSize();
+
+      const common={cols,rows,time:t,density:state.density,blurPasses:Math.round(state.blur),
+        arms:Math.round(state.arms),pitch:state.pitch,armSpread:state.armSpread,radialSpread:state.radialSpread,
+        barStrength:state.barStrength,ringStrength:state.ringStrength,ellipticity:state.ellipticity};
+      const proc = mode3D ? renderGalaxy3D({...common, baseX:state.baseX,baseY:state.baseY,baseZ:state.baseZ,spinX:state.spinX,spinY:state.spinY,spinZ:state.spinZ,camZ:state.camZ,zSpread:state.zSpread,thickness:state.thickness})
+                          : renderGalaxy2D(common);
+
+      let field;
+      if(state.useNpy && volume){
+        if(state.useVolume && mode3D){
+          if(!samples) buildSamplesFromVolume();
+          field = renderFieldFromSamples(samples?.pts, cols, rows, t);
+          const a=state.mix; if(a<1){ for(let i=0;i<field.length;i++) field[i]=(1-a)*proc[i]+a*field[i]; normalize01(field); }
+        }else{
+          const proj=projectVolumeTo2D(volume, t);
+          const npy2d=resample2D(proj.data, proj.W, proj.H, cols, rows);
+          field=new Float32Array(cols*rows);
+          const a=state.mix; for(let i=0;i<field.length;i++) field[i]=(1-a)*proc[i]+a*npy2d[i]; normalize01(field);
+        }
+      }else{
+        field=proc;
+      }
+
+      out.textContent=fieldToAscii(field,cols,rows,charset);
+    }
+    requestAnimationFrame(tick);
+  }
+  tick();
+
+  function renderFieldFromSamples(pts, cols, rows, t){
+    const field=new Float32Array(cols*rows);
+    if(!pts) return field;
+    const rx=state.baseX+t*state.spinX, ry=state.baseY+t*state.spinY, rz=state.baseZ+t*state.spinZ;
+    const cX=Math.cos(rx),sX=Math.sin(rx),cY=Math.cos(ry),sY=Math.sin(ry),cZ=Math.cos(rz),sZ=Math.sin(rz);
+    const margin=.92;
+    for(let i=0;i<pts.length;i+=3){
+      let x=pts[i], y=pts[i+1], z=pts[i+2];
+      let yx=y*cX - z*sX, zx=y*sX + z*cX, xx=x;
+      let xxy=xx*cY + zx*sY, zxy=-xx*sY + zx*cY, yxy=yx;
+      const xr=xxy*cZ - yxy*sZ, yr=xxy*sZ + yxy*cZ, zr=zxy;
+      const proj=1.1/(state.camZ - zr + 1e-3);
+      const sx=(xr*proj/margin + .5)*(cols-1), sy=(yr*proj/margin + .5)*(rows-1);
+      if(sx<0||sx>=cols-1||sy<0||sy>=rows-1) continue;
+      const x0=sx|0,y0=sy|0,dx=sx-x0,dy=sy-y0,x1=x0+1,y1=y0+1;
+      const w00=(1-dx)*(1-dy),w10=dx*(1-dy),w01=(1-dx)*dy,w11=dx*dy;
+      const rr2=(xr*xr+yr*yr);
+      let b=Math.pow(1-Math.min(1,Math.sqrt(rr2)), 1.6);
+      field[y0*cols+x0]+=b*w00; field[y0*cols+x1]+=b*w10; field[y1*cols+x0]+=b*w01; field[y1*cols+x1]+=b*w11;
+    }
+    boxBlur(field,cols,rows,Math.round(state.blur)); normalize01(field); return field;
+  }
+
+  function projectVolumeTo2D(vol, t){
+    const {data,W,H,D}=vol;
+    const out2d=new Float32Array(W*H);
+    for(let h=0; h<H; h++){
+      for(let w=0; w<W; w++){
+        let m=0;
+        for(let d=0; d<D; d++){
+          const idx=(h*W + w)*D + d;
+          const v=data[idx];
+          if(v>m) m=v;
+        }
+        out2d[h*W + w]=m;
+      }
+    }
+    normalize01(out2d);
+    return {data:out2d, W, H};
+  }
+})();
+</script>
+</body>
+</html>

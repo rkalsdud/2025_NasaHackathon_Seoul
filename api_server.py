@@ -1,156 +1,60 @@
-# Flask 및 관련 라이브러리 설치
-from flask import Flask, request, jsonify
+# api_server.py
+# FastAPI 서버: 6개의 파라미터를 받아 예측 + FITS 선택 + 3D 볼륨 생성 후
+# .npy 바이너리로 반환합니다.
+from __future__ import annotations
+import io, traceback, sys
 import numpy as np
-from astropy.io import fits
-from skimage.transform import resize
-import os
+from fastapi import FastAPI, Query
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response, JSONResponse
 
-import NASAdata as nd
+import NASAdata as nd  # 같은 폴더의 모듈
 
-def load_raw_fits_image(file_path):
-    """FITS 파일을 열어 첫 번째 또는 두 번째 HDU에서 원본 데이터를 찾아 반환합니다."""
+app = FastAPI(title="Galaxy Volume API", version="1.0.0")
+
+# CORS: 프론트가 file:// 로 열려도 편히 테스트 가능
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # 필요시 도메인 제한
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+@app.get("/health")
+def health():
+    return {"ok": True}
+
+@app.get("/predict_volume.npy")
+def predict_volume_npy(
+    sersic_n: float = Query(2.0, description="Sersic index"),
+    ba_ratio: float = Query(0.7, description="b/a axis ratio"),
+    sigma: float    = Query(120.0, description="central velocity dispersion"),
+    sfr: float      = Query(0.03, description="star formation rate"),
+    redshift: float = Query(0.05, description="redshift"),
+    sb_1re: float   = Query(0.4, description="surface brightness at 1Re"),
+    depth: int      = Query(64, ge=8, le=256, description="Z slices"),
+    thickness: float= Query(0.35, ge=0.05, le=1.0, description="disk thickness"),
+    out_xy: int     = Query(256, ge=32, le=512, description="XY resolution"),
+):
     try:
-        with fits.open(file_path) as hdul:
-            image_data = None
-            # Extension HDU (주로 SCI 데이터)를 먼저 시도
-            if len(hdul) > 1 and hdul[1].data is not None:
-                image_data = hdul[1].data
-            # 없다면 Primary HDU 시도
-            elif hdul[0].data is not None:
-                image_data = hdul[0].data
-            else:
-                print(f"Error: No valid image data found in any HDU for {file_path}.")
-                return None
-            
-            image_data = image_data.astype(np.float32)
-            image_data = np.nan_to_num(image_data)
-            return image_data
-            
+        _, _, _, vol = nd.predict_and_build_volume(
+            sersic_n, ba_ratio, sigma, sfr, redshift, sb_1re,
+            depth=depth, thickness=thickness, out_xy=out_xy
+        )
+        buf = io.BytesIO()
+        np.save(buf, vol.astype(np.float32))  # .npy 직렬화
+        return Response(
+            content=buf.getvalue(),
+            media_type="application/octet-stream",
+            headers={"Content-Disposition": 'attachment; filename="volume.npy"'}
+        )
     except Exception as e:
-        print(f"An error occurred while loading {file_path}: {e}")
-        return None
+        traceback.print_exc(file=sys.stderr)  # ★ 콘솔에 스택 출력
+        return JSONResponse({"error": str(e)}, status_code=500)
 
-def create_3d_voxel_grid(image_2d, depth=32, threshold=0.01):
-    """재조정된 2D 이미지를 받아 3D 복셀 그리드를 생성합니다."""
-    height, width = image_2d.shape
-    voxel_grid = np.zeros((height, width, depth), dtype=np.float32)
-    print(f"Creating {height}x{width}x{depth} voxel grid...")
 
-    # NumPy 벡터화 연산으로 성능 향상
-    y, x = np.where(image_2d > threshold)
-    brightness = image_2d[y, x]
-    
-    fill_depth = np.round(brightness * depth).astype(int)
-    fill_depth[fill_depth == 0] = 1
-    
-    start_z = np.round((depth / 2) - (fill_depth / 2)).astype(int)
-    end_z = np.round((depth / 2) + (fill_depth / 2)).astype(int)
-    
-    for i in range(len(x)):
-        sz, ez = start_z[i], end_z[i]
-        if sz >= ez: ez = sz + 1
-        voxel_grid[y[i], x[i], sz:ez] = brightness[i]
-            
-    print("Voxel grid creation complete.")
-    return voxel_grid
-
-def convert_fits_to_3d_array(fits_path, output_xy_size=256, output_depth=32):
-    """
-    하나의 FITS 파일을 최종 3D NumPy 배열로 변환하는 메인 함수.
-    """
-    print(f"\n--- Processing file: {fits_path} ---")
-    
-    # 1. 원본 FITS 로드
-    raw_image_2d = load_raw_fits_image(fits_path)
-    if raw_image_2d is None:
-        return None
-
-    # 2. 고해상도 2D 이미지 재조정 (Contrast Stretching)
-    print("Scaling 2D image...")
-    vmin, vmax = np.percentile(raw_image_2d, [1, 99.5])
-    clipped_image = np.clip(raw_image_2d, vmin, vmax)
-    scaled_image_2d = (clipped_image - vmin) / (vmax - vmin)
-    print("Image scaling complete.")
-    
-    # 3. '작은' 2D 이미지를 먼저 만듭니다.
-    resized_2d_for_3d = resize(scaled_image_2d, (output_xy_size, output_xy_size), anti_aliasing=True)
-
-    # 4. '작은' 2D 이미지로 '작은' 3D 복셀 그리드를 생성합니다.
-    voxel_3d = create_3d_voxel_grid(resized_2d_for_3d, depth=output_depth)
-    
-    return voxel_3d
-# --- Flask API 서버 설정 ---
-app = Flask(__name__)
-
-# 미리 정해진 FITS 파일들의 경로를 딕셔너리로 관리
-AVAILABLE_FITS = {
-    "sample_m51.fits" = "data/sample_m51.fits"
-    "sample_m63.fits" = "data/sample_m63.fits"
-    "sample_ngc 1300.fits" = "data/sample_ngc 1300.fits"
-    "sample_ngc 5866.fits" = "data/sample_ngc 5866.fits"
-    "sample_ngc 7479.fits" = "data/sample_ngc 7479.fits"
-    "sample_m49.fits" = "data/sample_m49.fits"
-    "sample_m59.fits" = "data/sample_m59.fits"
-    "sample_m87.fits" = "data/sample_m87.fits"
-    "sample_m104.fits" = "data/sample_m104.fits"
-    "sample_m82.fits" = "data/sample_m82.fits"
-    "sample_ngc 5204.fits" = "data/sample_ngc 5204.fits"
-    "sample_ngc 6822.fits" = "data/sample_ngc 6822.fits"
-}
-
-@app.route('/generate_3d', methods=['GET'])
-def generate_3d():
-    # 1. 클라이언트가 요청한 파일 키를 가져옵니다 (예: 'm51')
-    #file_key = request.args.get('file')
-    # 2. 요청이 유효한지 확인
-    # if not file_key or file_key not in AVAILABLE_FITS:
-    #     return jsonify({"error": "Invalid or missing file key"}), 400
-
-    # fits_path = AVAILABLE_FITS[file_key]
-    # if not os.path.exists(fits_path):
-    #     return jsonify({"error": f"FITS file not found at path: {fits_path}"}), 404
-
-#//////////////////////////////
-    # --- 1. 6개의 파라미터 수신 및 검증 ---
-    params_keys = ['sersic_n', 'ba_ratio', 'sigma', 'sfr', 'redshift', 'sb_1re']
-    params = {}
-    try:
-        for key in params_keys:
-            # request.args.get으로 파라미터를 받고, float으로 변환
-            value = request.args.get(key)
-            if value is None:
-                # 파라미터가 하나라도 누락된 경우
-                raise ValueError(f"Missing required parameter: {key}")
-            params[key] = float(value)
-    except (ValueError, TypeError) as e:
-        # 파라미터가 없거나, 숫자로 변환할 수 없는 경우 400 Bad Request 오류 반환
-        return jsonify({"error": str(e)}), 400
-
-#////////////////////////////////
-    df_galaxy_samples = nd.get_sample_galaxy_data(**params)
-    
-    predicted_type, predicted_size = nd.predict_galaxy_all()
-
-    closest_file = nd.find_closest_fits(predicted_type, predicted_size, df_galaxy_samples)
-
-    if closest_file not in AVAILABLE_FITS:
-        return jsonify({"error": f"Could not find a matching FITS file path for '{closest_file}'"}), 404
-        
-    fits_path = AVAILABLE_FITS[closest_file]
-#///////////////////////////////    
-
-    # 3. 실시간으로 3D 배열 생성
-    voxel_3d_array = convert_fits_to_3d_array(fits_path, output_xy_size=128, output_depth=32)
-
-    if voxel_3d_array is None:
-        return jsonify({"error": "Failed to process FITS file"}), 500
-
-    # 4. NumPy 배열을 JSON으로 보낼 수 있도록 리스트로 변환하여 전송
-    return jsonify({
-        "file_key": file_key,
-        "shape": voxel_3d_array.shape,
-        "voxel_data": voxel_3d_array.tolist()
-    })
-
-if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+# uvicorn api_server:app --reload --port 8000
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("api_server:app", host="127.0.0.1", port=8000, reload=True)
