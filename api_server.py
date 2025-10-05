@@ -1,11 +1,11 @@
 # Flask 및 관련 라이브러리 설치
-
-
 from flask import Flask, request, jsonify
 import numpy as np
 from astropy.io import fits
 from skimage.transform import resize
 import os
+
+import NASAdata as nd
 
 def load_raw_fits_image(file_path):
     """FITS 파일을 열어 첫 번째 또는 두 번째 HDU에서 원본 데이터를 찾아 반환합니다."""
