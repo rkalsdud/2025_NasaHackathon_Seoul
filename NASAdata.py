@@ -25,22 +25,25 @@ except FileNotFoundError:
 # --- 2단계: 예측 및 파일 검색을 위한 함수 정의 ---
 
 def predict_galaxy_all():
-    """사용자가 입력한 6개 값으로 은하 모양과 크기를 모두 예측하는 함수"""
-
-    # 사용자로부터 6가지 값 입력받기
+    """사용자로부터 직접 6개 값을 입력받아 은하 모양과 크기를 모두 예측하는 함수"""
     print("\n>>> 2단계: 은하의 특징을 나타내는 6가지 값을 입력해주세요.")
-    sersic_input = float(input("  1. 세르식 지수 (타원은하 ~4, 나선은하 ~1): "))
-    ba_ratio_input = float(input("  2. 장축 대 단축 비율 (둥글수록 1, 납작할수록 0): "))
-    sigma_input = float(input("  3. 중심 속도 분산 (타원은하 ~200, 나선은하 ~70): "))
-    sfr_input = float(input("  4. 총 별 형성률 (타원은하 <0.01, 나선/불규칙 >0.01): "))
-    redshift_input = float(input("  5. 적색편이 (거리가 멀수록 큼, 예: 0.1): "))
-    sb_1re_input = float(input("  6. 표면 밝기 (SB_1RE) (밝을수록 작음, 예: 0.4): "))
+    
+    # 사용자 입력을 받아 변수에 저장
+    sersic_n = float(input("  1. 세르식 지수 (타원은하 ~4, 나선은하 ~1): "))
+    ba_ratio = float(input("  2. 장축 대 단축 비율 (둥글수록 1, 납작할수록 0): "))
+    sigma = float(input("  3. 중심 속도 분산 (타원은하 ~200, 나선은하 ~70): "))
+    sfr = float(input("  4. 총 별 형성률 (타원은하 <0.01, 나선/불규칙 >0.01): "))
+    redshift = float(input("  5. 적색편이 (거리가 멀수록 큼, 예: 0.1): "))
+    sb_1re = float(input("  6. 표면 밝기 (SB_1RE) (밝을수록 작음, 예: 0.4): "))
 
-    # 입력을 DataFrame 형식으로 변환 (모델이 요구하는 형식)
+    # 입력을 DataFrame 형식으로 변환
     input_data = pd.DataFrame({
-        'NSA_SERSIC_N': [sersic_n], 'NSA_ELPETRO_BA': [ba_ratio],
-        'STELLAR_SIGMA_1RE': [sigma], 'SFR_TOT': [sfr],
-        'Z': [redshift], 'SB_1RE': [sb_1re]
+        'NSA_SERSIC_N': [sersic_n], 
+        'NSA_ELPETRO_BA': [ba_ratio],
+        'STELLAR_SIGMA_1RE': [sigma], 
+        'SFR_TOT': [sfr],
+        'Z': [redshift], 
+        'SB_1RE': [sb_1re]
     })
 
     # 모델 1: 모양 예측 (분류)
@@ -92,16 +95,7 @@ if __name__ == "__main__":
     ]
     df_galaxy_samples = pd.DataFrame(sample_data, columns=["형태", "은하", "Re", "FITS"])
 
-    # # 사용자로부터 6가지 값 입력받기
-    # print("\n>>> 2단계: 은하의 특징을 나타내는 6가지 값을 입력해주세요.")
-    # sersic_input = float(input("  1. 세르식 지수 (타원은하 ~4, 나선은하 ~1): "))
-    # ba_ratio_input = float(input("  2. 장축 대 단축 비율 (둥글수록 1, 납작할수록 0): "))
-    # sigma_input = float(input("  3. 중심 속도 분산 (타원은하 ~200, 나선은하 ~70): "))
-    # sfr_input = float(input("  4. 총 별 형성률 (타원은하 <0.01, 나선/불규칙 >0.01): "))
-    # redshift_input = float(input("  5. 적색편이 (거리가 멀수록 큼, 예: 0.1): "))
-    # sb_1re_input = float(input("  6. 표면 밝기 (SB_1RE) (밝을수록 작음, 예: 0.4): "))
-
-    # 입력값으로 예측 실행
+    # 입력 및 예측 함수 호출 (파라미터 필요 없음)
     predicted_type, predicted_size = predict_galaxy_all()
 
     # 예측 결과와 가장 유사한 샘플 FITS 파일 찾기
@@ -115,7 +109,6 @@ if __name__ == "__main__":
             # 이 부분에 matplotlib 등을 이용한 이미지 시각화 코드를 추가할 수 있습니다.
             # hdu = fits.open(closest_file)
             # print(f"'{closest_file}' 파일을 성공적으로 열었습니다. (데이터 확인 가능)")
-            pass # 지금은 파일 열기만 확인
+            pass # 지금은 별도 작업 없음
         except FileNotFoundError:
             print(f"'{closest_file}' 파일을 찾을 수 없습니다. 샘플 FITS 파일들이 있는지 확인하세요.")
-
