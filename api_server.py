@@ -84,9 +84,18 @@ app = Flask(__name__)
 
 # 미리 정해진 FITS 파일들의 경로를 딕셔너리로 관리
 AVAILABLE_FITS = {
-    "m51": "data/m51.fits",
-    "m101": "data/m101.fits",
-    "ngc1300": "data/ngc1300.fits"
+    "sample_m51.fits" = "data/sample_m51.fits"
+    "sample_m63.fits" = "data/sample_m63.fits"
+    "sample_ngc 1300.fits" = "data/sample_ngc 1300.fits"
+    "sample_ngc 5866.fits" = "data/sample_ngc 5866.fits"
+    "sample_ngc 7479.fits" = "data/sample_ngc 7479.fits"
+    "sample_m49.fits" = "data/sample_m49.fits"
+    "sample_m59.fits" = "data/sample_m59.fits"
+    "sample_m87.fits" = "data/sample_m87.fits"
+    "sample_m104.fits" = "data/sample_m104.fits"
+    "sample_m82.fits" = "data/sample_m82.fits"
+    "sample_ngc 5204.fits" = "data/sample_ngc 5204.fits"
+    "sample_ngc 6822.fits" = "data/sample_ngc 6822.fits"
 }
 
 @app.route('/generate_3d', methods=['GET'])
