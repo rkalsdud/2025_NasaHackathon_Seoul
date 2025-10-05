@@ -127,12 +127,15 @@ def generate_3d():
         return jsonify({"error": str(e)}), 400
 
 #////////////////////////////////
-    df_galaxy_samples = nd.get_sample_galaxy_data(sersic_n, ba_ratio, sigma, sfr, redshift, sb_1re)
+    df_galaxy_samples = nd.get_sample_galaxy_data(**params)
     
     predicted_type, predicted_size = nd.predict_galaxy_all()
 
     closest_file = nd.find_closest_fits(predicted_type, predicted_size, df_galaxy_samples)
 
+    if closest_file not in AVAILABLE_FITS:
+        return jsonify({"error": f"Could not find a matching FITS file path for '{closest_file}'"}), 404
+        
     fits_path = AVAILABLE_FITS[closest_file]
 #///////////////////////////////    
 
