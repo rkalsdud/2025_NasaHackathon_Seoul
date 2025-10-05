@@ -1,119 +1,114 @@
-# Flask 및 관련 라이브러리 설치
+# predict_galaxy.py
+# -----------------
+# 이 스크립트는 사전에 학습되고 저장된 머신러닝 모델을 불러와
+# 사용자가 입력한 6가지 물리량으로 은하의 형태와 크기를 예측하고,
+# 가장 유사한 샘플 은하의 이미지 파일(FITS)을 찾아줍니다.
 
-
-from flask import Flask, request, jsonify
+# --- 0단계: 필수 라이브러리 불러오기 ---
+import pandas as pd
 import numpy as np
-from astropy.io import fits
-from skimage.transform import resize
-import os
+import joblib
+from astropy.io import fits # FITS 파일 처리를 위해 필요
 
-def load_raw_fits_image(file_path):
-    """FITS 파일을 열어 첫 번째 또는 두 번째 HDU에서 원본 데이터를 찾아 반환합니다."""
-    try:
-        with fits.open(file_path) as hdul:
-            image_data = None
-            # Extension HDU (주로 SCI 데이터)를 먼저 시도
-            if len(hdul) > 1 and hdul[1].data is not None:
-                image_data = hdul[1].data
-            # 없다면 Primary HDU 시도
-            elif hdul[0].data is not None:
-                image_data = hdul[0].data
-            else:
-                print(f"Error: No valid image data found in any HDU for {file_path}.")
-                return None
-            
-            image_data = image_data.astype(np.float32)
-            image_data = np.nan_to_num(image_data)
-            return image_data
-            
-    except Exception as e:
-        print(f"An error occurred while loading {file_path}: {e}")
-        return None
+# --- 1단계: 저장된 모델 불러오기 ---
+print(">>> 1단계: 저장된 머신러닝 모델을 불러옵니다...")
+try:
+    # joblib.load() 함수로 바이너리 파일을 다시 모델 객체로 복원합니다.
+    model_type = joblib.load('galaxy_type_classifier.joblib')
+    model_size = joblib.load('galaxy_size_regressor.joblib')
+    print("✅ 모델 로딩 성공!")
+except FileNotFoundError:
+    print("🚨 [오류] 모델 파일을 찾을 수 없습니다.")
+    print("이 스크립트와 같은 위치에 'galaxy_type_classifier.joblib'와 'galaxy_size_regressor.joblib' 파일이 있는지 확인해주세요.")
+    exit() # 프로그램 종료
 
-def create_3d_voxel_grid(image_2d, depth=32, threshold=0.01):
-    """재조정된 2D 이미지를 받아 3D 복셀 그리드를 생성합니다."""
-    height, width = image_2d.shape
-    voxel_grid = np.zeros((height, width, depth), dtype=np.float32)
-    print(f"Creating {height}x{width}x{depth} voxel grid...")
+# --- 2단계: 예측 및 파일 검색을 위한 함수 정의 ---
 
-    # NumPy 벡터화 연산으로 성능 향상
-    y, x = np.where(image_2d > threshold)
-    brightness = image_2d[y, x]
+def predict_galaxy_all():
+    """사용자로부터 직접 6개 값을 입력받아 은하 모양과 크기를 모두 예측하는 함수"""
+    print("\n>>> 2단계: 은하의 특징을 나타내는 6가지 값을 입력해주세요.")
     
-    fill_depth = np.round(brightness * depth).astype(int)
-    fill_depth[fill_depth == 0] = 1
-    
-    start_z = np.round((depth / 2) - (fill_depth / 2)).astype(int)
-    end_z = np.round((depth / 2) + (fill_depth / 2)).astype(int)
-    
-    for i in range(len(x)):
-        sz, ez = start_z[i], end_z[i]
-        if sz >= ez: ez = sz + 1
-        voxel_grid[y[i], x[i], sz:ez] = brightness[i]
-            
-    print("Voxel grid creation complete.")
-    return voxel_grid
+    # 사용자 입력을 받아 변수에 저장
+    sersic_n = float(input("  1. 세르식 지수 (타원은하 ~4, 나선은하 ~1): "))
+    ba_ratio = float(input("  2. 장축 대 단축 비율 (둥글수록 1, 납작할수록 0): "))
+    sigma = float(input("  3. 중심 속도 분산 (타원은하 ~200, 나선은하 ~70): "))
+    sfr = float(input("  4. 총 별 형성률 (타원은하 <0.01, 나선/불규칙 >0.01): "))
+    redshift = float(input("  5. 적색편이 (거리가 멀수록 큼, 예: 0.1): "))
+    sb_1re = float(input("  6. 표면 밝기 (SB_1RE) (밝을수록 작음, 예: 0.4): "))
 
-def convert_fits_to_3d_array(fits_path, output_xy_size=256, output_depth=32):
-    """
-    하나의 FITS 파일을 최종 3D NumPy 배열로 변환하는 메인 함수.
-    """
-    print(f"\n--- Processing file: {fits_path} ---")
-    
-    # 1. 원본 FITS 로드
-    raw_image_2d = load_raw_fits_image(fits_path)
-    if raw_image_2d is None:
-        return None
-
-    # 2. 고해상도 2D 이미지 재조정 (Contrast Stretching)
-    print("Scaling 2D image...")
-    vmin, vmax = np.percentile(raw_image_2d, [1, 99.5])
-    clipped_image = np.clip(raw_image_2d, vmin, vmax)
-    scaled_image_2d = (clipped_image - vmin) / (vmax - vmin)
-    print("Image scaling complete.")
-    
-    # 3. '작은' 2D 이미지를 먼저 만듭니다.
-    resized_2d_for_3d = resize(scaled_image_2d, (output_xy_size, output_xy_size), anti_aliasing=True)
-
-    # 4. '작은' 2D 이미지로 '작은' 3D 복셀 그리드를 생성합니다.
-    voxel_3d = create_3d_voxel_grid(resized_2d_for_3d, depth=output_depth)
-    
-    return voxel_3d
-# --- Flask API 서버 설정 ---
-app = Flask(__name__)
-
-# 미리 정해진 FITS 파일들의 경로를 딕셔너리로 관리
-AVAILABLE_FITS = {
-    "m51": "data/m51.fits",
-    "m101": "data/m101.fits",
-    "ngc1300": "data/ngc1300.fits"
-}
-
-@app.route('/generate_3d', methods=['GET'])
-def generate_3d():
-    # 1. 클라이언트가 요청한 파일 키를 가져옵니다 (예: 'm51')
-    file_key = request.args.get('file')
-
-    # 2. 요청이 유효한지 확인
-    if not file_key or file_key not in AVAILABLE_FITS:
-        return jsonify({"error": "Invalid or missing file key"}), 400
-
-    fits_path = AVAILABLE_FITS[file_key]
-    if not os.path.exists(fits_path):
-        return jsonify({"error": f"FITS file not found at path: {fits_path}"}), 404
-
-    # 3. 실시간으로 3D 배열 생성
-    voxel_3d_array = convert_fits_to_3d_array(fits_path, output_xy_size=128, output_depth=32)
-
-    if voxel_3d_array is None:
-        return jsonify({"error": "Failed to process FITS file"}), 500
-
-    # 4. NumPy 배열을 JSON으로 보낼 수 있도록 리스트로 변환하여 전송
-    return jsonify({
-        "file_key": file_key,
-        "shape": voxel_3d_array.shape,
-        "voxel_data": voxel_3d_array.tolist()
+    # 입력을 DataFrame 형식으로 변환
+    input_data = pd.DataFrame({
+        'NSA_SERSIC_N': [sersic_n], 
+        'NSA_ELPETRO_BA': [ba_ratio],
+        'STELLAR_SIGMA_1RE': [sigma], 
+        'SFR_TOT': [sfr],
+        'Z': [redshift], 
+        'SB_1RE': [sb_1re]
     })
 
-if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    # 모델 1: 모양 예측 (분류)
+    type_prediction = model_type.predict(input_data)[0]
+    type_probabilities = model_type.predict_proba(input_data)[0]
+
+    # 모델 2: 크기 예측 (회귀)
+    size_prediction = model_size.predict(input_data)[0]
+
+    print("\n--- 💡 통합 예측 결과 ---")
+    print(f"➡️  은하 모양: '{type_prediction}'일 가능성이 높습니다.")
+    print(f"➡️  은하 크기: 유효반경 약 {size_prediction:.2f} arcsec로 예측됩니다.")
+    print("\n[상세] 모양별 확률:")
+    for i, class_name in enumerate(model_type.classes_):
+        print(f"  - {class_name}: {type_probabilities[i]*100:.2f}%")
+
+    return type_prediction, size_prediction
+
+def find_closest_fits(input_type, input_re, df_samples):
+    """예측된 결과와 가장 유사한 샘플 은하의 FITS 파일명을 찾는 함수"""
+    # 예측된 형태와 일치하는 은하들만 필터링
+    subset = df_samples[df_samples['형태'] == input_type].copy()
+    if subset.empty:
+        print(f"\n[알림] '{input_type}' 형태와 일치하는 샘플 은하가 목록에 없습니다.")
+        return None
+
+    # 예측된 크기(Re)와의 차이를 계산하여 가장 차이가 적은 은하를 찾음
+    subset['diff'] = np.abs(subset['Re'] - input_re)
+    closest = subset.loc[subset['diff'].idxmin()]
+    return closest['FITS']
+
+
+# --- 3단계: 메인 코드 실행 ---
+if __name__ == "__main__":
+    # 샘플 은하 데이터 정의
+    sample_data = [
+        ["Late-type (Spiral)", "M51", 47, "sample_m51.fits"],
+        ["Late-type (Spiral)", "M63", 30, "sample_m63.fits"],
+        ["Late-type (Spiral)", "NGC 5866", 26, "sample_ngc5866.fits"],
+        ["Late-type (Spiral)", "NGC 1300", 18, "sample_ngc1300.fits"],
+        ["Late-type (Spiral)", "NGC 7479", 13, "sample_ngc7479.fits"],
+        ["Early-type (Elliptical)", "M87", 72, "sample_m87.fits"],
+        ["Early-type (Elliptical)", "M49", 50, "sample_m49.fits"],
+        ["Early-type (Elliptical)", "M104", 38, "sample_m104.fits"],
+        ["Early-type (Elliptical)", "M59", 21, "sample_m59.fits"],
+        ["Irregular", "NGC 6822", 105, "sample_ngc6822.fits"],
+        ["Irregular", "M82", 35, "sample_m82.fits"],
+        ["Irregular", "NGC 5204", 13, "sample_ngc5204.fits"]
+    ]
+    df_galaxy_samples = pd.DataFrame(sample_data, columns=["형태", "은하", "Re", "FITS"])
+
+    # 입력 및 예측 함수 호출 (파라미터 필요 없음)
+    predicted_type, predicted_size = predict_galaxy_all()
+
+    # 예측 결과와 가장 유사한 샘플 FITS 파일 찾기
+    print("\n>>> 3단계: 예측 결과와 가장 유사한 샘플 은하를 찾습니다...")
+    closest_file = find_closest_fits(predicted_type, predicted_size, df_galaxy_samples)
+
+    if closest_file:
+        print(f"✅ 찾은 FITS 파일: {closest_file}")
+        # FITS 파일 로드 시도 (시각화 등 추가 작업 가능)
+        try:
+            # 이 부분에 matplotlib 등을 이용한 이미지 시각화 코드를 추가할 수 있습니다.
+            # hdu = fits.open(closest_file)
+            # print(f"'{closest_file}' 파일을 성공적으로 열었습니다. (데이터 확인 가능)")
+            pass # 지금은 별도 작업 없음
+        except FileNotFoundError:
+            print(f"'{closest_file}' 파일을 찾을 수 없습니다. 샘플 FITS 파일들이 있는지 확인하세요.")
