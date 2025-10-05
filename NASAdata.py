@@ -16,10 +16,10 @@ try:
     # joblib.load() 함수로 바이너리 파일을 다시 모델 객체로 복원
     model_type = joblib.load('galaxy_type_classifier.joblib')
     model_size = joblib.load('galaxy_size_regressor.joblib')
-    print("✅ 모델 로딩 성공!")
+    # print("✅ 모델 로딩 성공!")
 except FileNotFoundError:
-    print("🚨 [오류] 모델 파일을 찾을 수 없습니다.")
-    print("이 스크립트와 같은 위치에 'galaxy_type_classifier.joblib'와 'galaxy_size_regressor.joblib' 파일이 있는지 확인해주세요.")
+    # print("🚨 [오류] 모델 파일을 찾을 수 없습니다.")
+    # print("이 스크립트와 같은 위치에 'galaxy_type_classifier.joblib'와 'galaxy_size_regressor.joblib' 파일이 있는지 확인해주세요.")
     exit() # 프로그램 종료
 
 # 예측 및 파일 검색을 위한 함수 정의
@@ -43,17 +43,8 @@ def get_sample_galaxy_data():
     df_samples = pd.DataFrame(sample_data, columns=["형태", "은하", "Re", "FITS"])
     return df_samples
 
-def predict_galaxy_all():
+def predict_galaxy_all(sersic_n, ba_ratio, sigma, sfr, redshift, sb_1re):
     """사용자로부터 직접 6개 값을 입력받아 은하 모양과 크기를 모두 예측하는 함수"""
-    print("\n>>> 2단계: 은하의 특징을 나타내는 6가지 값을 입력해주세요.")
-    
-    # 사용자 입력을 받아 변수에 저장
-    sersic_n = float(input("  1. 세르식 지수 (타원은하 ~4, 나선은하 ~1): "))
-    ba_ratio = float(input("  2. 장축 대 단축 비율 (둥글수록 1, 납작할수록 0): "))
-    sigma = float(input("  3. 중심 속도 분산 (타원은하 ~200, 나선은하 ~70): "))
-    sfr = float(input("  4. 총 별 형성률 (타원은하 <0.01, 나선/불규칙 >0.01): "))
-    redshift = float(input("  5. 적색편이 (거리가 멀수록 큼, 예: 0.1): "))
-    sb_1re = float(input("  6. 표면 밝기 (SB_1RE) (밝을수록 작음, 예: 0.4): "))
 
     # 입력을 DataFrame 형식으로 변환
     input_data = pd.DataFrame({
@@ -67,17 +58,17 @@ def predict_galaxy_all():
 
     # 모델 1: 모양 예측 (분류)
     type_prediction = model_type.predict(input_data)[0]
-    type_probabilities = model_type.predict_proba(input_data)[0]
+    # type_probabilities = model_type.predict_proba(input_data)[0]
 
     # 모델 2: 크기 예측 (회귀)
     size_prediction = model_size.predict(input_data)[0]
 
-    print("\n--- 💡 통합 예측 결과 ---")
-    print(f"➡️  은하 모양: '{type_prediction}'일 가능성이 높습니다.")
-    print(f"➡️  은하 크기: 유효반경 약 {size_prediction:.2f} arcsec로 예측됩니다.")
-    print("\n[상세] 모양별 확률:")
-    for i, class_name in enumerate(model_type.classes_):
-        print(f"  - {class_name}: {type_probabilities[i]*100:.2f}%")
+    # print("\n--- 💡 통합 예측 결과 ---")
+    # print(f"➡️  은하 모양: '{type_prediction}'일 가능성이 높습니다.")
+    # print(f"➡️  은하 크기: 유효반경 약 {size_prediction:.2f} arcsec로 예측됩니다.")
+    # print("\n[상세] 모양별 확률:")
+    # for i, class_name in enumerate(model_type.classes_):
+    #     print(f"  - {class_name}: {type_probabilities[i]*100:.2f}%")
 
     return type_prediction, size_prediction
 
@@ -95,22 +86,33 @@ def find_closest_fits(input_type, input_re, df_samples):
     return closest['FITS']
 
 
-#  메인 코드 실행 ---
-if __name__ == "__main__":
-    # 1. 샘플 은하 데이터 준비
-    df_galaxy_samples = get_sample_galaxy_data()
+# #  메인 코드 실행 ---
+# if __name__ == "__main__":
+#     # 1. 샘플 은하 데이터 준비
+
+#     print("\n>>> 2단계: 은하의 특징을 나타내는 6가지 값을 입력해주세요.")
     
-    # 2. 사용자 입력 및 은하 특성 예측
-    predicted_type, predicted_size = predict_galaxy_all()
+#     # 사용자 입력을 받아 변수에 저장
+#     sersic_n = float(input("  1. 세르식 지수 (타원은하 ~4, 나선은하 ~1): "))
+#     ba_ratio = float(input("  2. 장축 대 단축 비율 (둥글수록 1, 납작할수록 0): "))
+#     sigma = float(input("  3. 중심 속도 분산 (타원은하 ~200, 나선은하 ~70): "))
+#     sfr = float(input("  4. 총 별 형성률 (타원은하 <0.01, 나선/불규칙 >0.01): "))
+#     redshift = float(input("  5. 적색편이 (거리가 멀수록 큼, 예: 0.1): "))
+#     sb_1re = float(input("  6. 표면 밝기 (SB_1RE) (밝을수록 작음, 예: 0.4): "))
+    
+#     df_galaxy_samples = get_sample_galaxy_data(sersic_n, ba_ratio, sigma, sfr, redshift, sb_1re)
+    
+#     # 2. 사용자 입력 및 은하 특성 예측
+#     predicted_type, predicted_size = predict_galaxy_all()
 
-    # 3. 예측 결과와 가장 유사한 샘플 FITS 파일 찾기
-    print("\n>>> 3단계: 예측 결과와 가장 유사한 샘플 은하를 찾습니다...")
-    closest_file = find_closest_fits(predicted_type, predicted_size, df_galaxy_samples)
+#     # 3. 예측 결과와 가장 유사한 샘플 FITS 파일 찾기
+#     print("\n>>> 3단계: 예측 결과와 가장 유사한 샘플 은하를 찾습니다...")
+#     closest_file = find_closest_fits(predicted_type, predicted_size, df_galaxy_samples)
 
-    if closest_file:
-        print(f"✅ 찾은 FITS 파일: {closest_file}")
-        try:
-            # hdu = fits.open(closest_file)
-            pass
-        except FileNotFoundError:
-            print(f"'{closest_file}' 파일을 찾을 수 없습니다. 샘플 FITS 파일들이 있는지 확인하세요.")
+#     if closest_file:
+#         print(f"✅ 찾은 FITS 파일: {closest_file}")
+#         try:
+#             # hdu = fits.open(closest_file)
+#             pass
+#         except FileNotFoundError:
+#             print(f"'{closest_file}' 파일을 찾을 수 없습니다. 샘플 FITS 파일들이 있는지 확인하세요.")
